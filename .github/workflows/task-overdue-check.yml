@@ -1,16 +1,9 @@
-
-
-
-
-
-
 name: Marcar Tarefas Atrasadas
 
 on:
   schedule:
-    # Executa diariamente às 9:00 AM (UTC)
     - cron: '0 9 * * *'
-  workflow_dispatch: # Permite disparar manualmente
+  workflow_dispatch:
 
 jobs:
   check-overdue-tasks:
@@ -25,10 +18,9 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const projectNumber = 1; // Altere para seu número de projeto
-            const owner = 'ltos2105-debug'; // Seu usuário
+            const projectNumber = 1;
+            const owner = 'ltos2105-debug';
             
-            // Query para obter tarefas do projeto
             const query = `
               query($owner:String!, $number:Int!) {
                 user(login:$owner) {
@@ -68,5 +60,35 @@ jobs:
               number: projectNumber
             };
             
-            const result = await github.graphql(query, variables);
-            const today = new Date().
+            try {
+              const result = await github.graphql(query, variables);
+              const today = new Date().toISOString().split('T')[0];
+              
+              console.log('📋 Verificando tarefas atrasadas...');
+              console.log(`Data atual: ${today}\n`);
+              
+              if (!result.user || !result.user.projectV2 || !result.user.projectV2.items) {
+                console.log('❌ Projeto não encontrado ou vazio');
+                return;
+              }
+              
+              let countOverdue = 0;
+              
+              for (const item of result.user.projectV2.items.nodes) {
+                const title = item.content?.title || 'Sem título';
+                const dueDate = item.fieldValueByName('Data de Vencimento')?.date;
+                const documentation = item.fieldValueByName('Documentação')?.text;
+                const status = item.fieldValueByName('Status')?.name;
+                
+                if (dueDate && dueDate < today && !documentation?.trim()) {
+                  countOverdue++;
+                  console.log(`🔴 ATRASADA: ${title}`);
+                  console.log(`   Vencimento: ${dueDate} | Status: ${status} | Documentação: VAZIA`);
+                  console.log('---');
+                }
+              }
+              
+              console.log(`\n✅ Verificação concluída: ${countOverdue} tarefas atrasadas encontradas`);
+            } catch (error) {
+              console.error('❌ Erro:', error.message);
+            }
