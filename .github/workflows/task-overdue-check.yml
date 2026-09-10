@@ -26,11 +26,30 @@ jobs:
                 user(login:$owner) {
                   projectV2(number:$number) {
                     id
+                    fields(first:20) {
+                      nodes {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                        }
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          name
+                          options {
+                            id
+                            name
+                          }
+                        }
+                      }
+                    }
                     items(first:100) {
                       nodes {
                         id
                         content {
                           ... on Issue {
+                            title
+                          }
+                          ... on DraftIssue {
                             title
                           }
                         }
@@ -64,16 +83,42 @@ jobs:
             try {
               const result = await github.graphql(query, variables);
               const today = new Date().toISOString().split('T')[0];
+              const projectId = result.user.projectV2.id;
               
-              console.log('📋 Verificando tarefas atrasadas...');
-              console.log(`📅 Data atual: ${today}\n`);
+              console.log('📋 ========== VERIFICAÇÃO DE TAREFAS ATRASADAS ==========');
+              console.log(`📅 Data atual: ${today}`);
+              console.log(`🔍 Projeto: ${projectNumber}`);
+              console.log('======================================================\n');
               
               if (!result.user || !result.user.projectV2 || !result.user.projectV2.items) {
                 console.log('❌ Projeto não encontrado ou vazio');
                 return;
               }
               
+              const fields = result.user.projectV2.fields.nodes;
+              let priorityFieldId = null;
+              let criticaOptionId = null;
+              
+              for (const field of fields) {
+                if (field.name === 'Prioridade') {
+                  priorityFieldId = field.id;
+                  if (field.options) {
+                    for (const option of field.options) {
+                      if (option.name === 'Crítica') {
+                        criticaOptionId = option.id;
+                        break;
+                      }
+                    }
+                  }
+                  break;
+                }
+              }
+              
+              console.log(`🔧 Campo Prioridade ID: ${priorityFieldId}`);
+              console.log(`🔧 Opção Crítica ID: ${criticaOptionId}\n`);
+              
               let countOverdue = 0;
+              let countUpdated = 0;
               
               for (const item of result.user.projectV2.items.nodes) {
                 const title = item.content?.title || 'Sem título';
@@ -83,15 +128,56 @@ jobs:
                 
                 if (dueDate && dueDate < today && !documentation?.trim()) {
                   countOverdue++;
-                  console.log(`🔴 ATRASADA: ${title}`);
+                  console.log(`🔴 TAREFA ATRASADA ENCONTRADA:`);
+                  console.log(`   📌 Título: ${title}`);
                   console.log(`   📅 Vencimento: ${dueDate}`);
-                  console.log(`   📄 Documentação: VAZIA`);
-                  console.log(`   🎯 Prioridade: ${priority || 'Não definida'}`);
-                  console.log('---');
+                  console.log(`   📄 Documentação: VAZIA ⚠️`);
+                  console.log(`   🎯 Prioridade Atual: ${priority || 'Não definida'}`);
+                  
+                  if (priorityFieldId && criticaOptionId) {
+                    const updated = await updateTaskPriority(projectId, item.id, priorityFieldId, criticaOptionId);
+                    if (updated) {
+                      countUpdated++;
+                      console.log(`   ✅ Marcada como CRÍTICA (Vermelho)`);
+                    }
+                  }
+                  console.log('');
                 }
               }
               
-              console.log(`\n✅ Verificação concluída: ${countOverdue} tarefas encontradas`);
+              console.log('======================================================');
+              console.log(`✅ RESUMO: ${countOverdue} atrasadas, ${countUpdated} marcadas`);
+              console.log('======================================================');
+              
             } catch (error) {
-              console.error('❌ Erro:', error.message);
+              console.error('❌ ERRO:', error.message);
+            }
+            
+            async function updateTaskPriority(projectId, itemId, fieldId, optionId) {
+              const updateQuery = `
+                mutation($input: UpdateProjectV2ItemFieldValueInput!) {
+                  updateProjectV2ItemFieldValue(input: $input) {
+                    projectV2Item {
+                      id
+                    }
+                  }
+                }
+              `;
+              
+              const input = {
+                projectId: projectId,
+                itemId: itemId,
+                fieldId: fieldId,
+                value: {
+                  singleSelectOptionId: optionId
+                }
+              };
+              
+              try {
+                await github.graphql(updateQuery, { input });
+                return true;
+              } catch (err) {
+                console.log(`   ⚠️ Erro ao atualizar: ${err.message}`);
+                return false;
+              }
             }
