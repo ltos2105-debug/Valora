@@ -48,6 +48,9 @@ jobs:
                         content {
                           ... on Issue {
                             title
+                            comments {
+                              totalCount
+                            }
                           }
                           ... on DraftIssue {
                             title
@@ -56,16 +59,6 @@ jobs:
                         fieldValueByName(name:"Data de Vencimento") {
                           ... on ProjectV2ItemFieldDateValue {
                             date
-                          }
-                        }
-                        fieldValueByName(name:"Documentação") {
-                          ... on ProjectV2ItemFieldTextValue {
-                            text
-                          }
-                        }
-                        fieldValueByName(name:"Prioridade") {
-                          ... on ProjectV2ItemFieldSingleSelectValue {
-                            name
                           }
                         }
                       }
@@ -97,16 +90,19 @@ jobs:
               
               const fields = result.user.projectV2.fields.nodes;
               let priorityFieldId = null;
-              let criticaOptionId = null;
+              let atrasadaOptionId = null;
+              let emAndamentoOptionId = null;
               
               for (const field of fields) {
                 if (field.name === 'Prioridade') {
                   priorityFieldId = field.id;
                   if (field.options) {
                     for (const option of field.options) {
-                      if (option.name === 'Crítica') {
-                        criticaOptionId = option.id;
-                        break;
+                      if (option.name === 'Atrasada') {
+                        atrasadaOptionId = option.id;
+                      }
+                      if (option.name === 'Em Andamento') {
+                        emAndamentoOptionId = option.id;
                       }
                     }
                   }
@@ -115,30 +111,39 @@ jobs:
               }
               
               console.log(`🔧 Campo Prioridade ID: ${priorityFieldId}`);
-              console.log(`🔧 Opção Crítica ID: ${criticaOptionId}\n`);
+              console.log(`🔧 Opção Atrasada ID: ${atrasadaOptionId}`);
+              console.log(`🔧 Opção Em Andamento ID: ${emAndamentoOptionId}\n`);
               
               let countOverdue = 0;
               let countUpdated = 0;
+              let countWithComments = 0;
               
               for (const item of result.user.projectV2.items.nodes) {
                 const title = item.content?.title || 'Sem título';
                 const dueDate = item.fieldValueByName('Data de Vencimento')?.date;
-                const documentation = item.fieldValueByName('Documentação')?.text;
-                const priority = item.fieldValueByName('Prioridade')?.name;
+                const commentCount = item.content?.comments?.totalCount || 0;
                 
-                if (dueDate && dueDate < today && !documentation?.trim()) {
+                if (dueDate && dueDate < today) {
                   countOverdue++;
-                  console.log(`🔴 TAREFA ATRASADA ENCONTRADA:`);
-                  console.log(`   📌 Título: ${title}`);
-                  console.log(`   📅 Vencimento: ${dueDate}`);
-                  console.log(`   📄 Documentação: VAZIA ⚠️`);
-                  console.log(`   🎯 Prioridade Atual: ${priority || 'Não definida'}`);
+                  console.log(`📌 Título: ${title}`);
+                  console.log(`   📅 Vencimento: ${dueDate} (VENCIDA)`);
+                  console.log(`   💬 Comentários: ${commentCount}`);
                   
-                  if (priorityFieldId && criticaOptionId) {
-                    const updated = await updateTaskPriority(projectId, item.id, priorityFieldId, criticaOptionId);
-                    if (updated) {
-                      countUpdated++;
-                      console.log(`   ✅ Marcada como CRÍTICA (Vermelho)`);
+                  if (commentCount === 0) {
+                    if (priorityFieldId && atrasadaOptionId) {
+                      const updated = await updateTaskPriority(projectId, item.id, priorityFieldId, atrasadaOptionId);
+                      if (updated) {
+                        countUpdated++;
+                        console.log(`   🔴 Marcada como ATRASADA (Vermelho) ⚠️`);
+                      }
+                    }
+                  } else {
+                    countWithComments++;
+                    if (priorityFieldId && emAndamentoOptionId) {
+                      const updated = await updateTaskPriority(projectId, item.id, priorityFieldId, emAndamentoOptionId);
+                      if (updated) {
+                        console.log(`   🟢 Mantida como EM ANDAMENTO (Verde) ✅`);
+                      }
                     }
                   }
                   console.log('');
@@ -146,11 +151,15 @@ jobs:
               }
               
               console.log('======================================================');
-              console.log(`✅ RESUMO: ${countOverdue} atrasadas, ${countUpdated} marcadas`);
+              console.log(`✅ RESUMO DA VERIFICAÇÃO:`);
+              console.log(`   📊 Total de tarefas vencidas: ${countOverdue}`);
+              console.log(`   🔴 Marcadas como ATRASADA: ${countUpdated}`);
+              console.log(`   🟢 Com comentários (Em Andamento): ${countWithComments}`);
               console.log('======================================================');
               
             } catch (error) {
-              console.error('❌ ERRO:', error.message);
+              console.error('❌ ERRO NA EXECUÇÃO:', error.message);
+              console.error(error);
             }
             
             async function updateTaskPriority(projectId, itemId, fieldId, optionId) {
