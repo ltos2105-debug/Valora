@@ -1,4 +1,4 @@
-name: Marcar Tarefas Atrasadas
+name: Marcar Tarefas Atrasadas em Vermelho
 
 on:
   schedule:
@@ -13,7 +13,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Verificar Tarefas Atrasadas
+      - name: Verificar e Marcar Tarefas Atrasadas
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -25,17 +25,13 @@ jobs:
               query($owner:String!, $number:Int!) {
                 user(login:$owner) {
                   projectV2(number:$number) {
+                    id
                     items(first:100) {
                       nodes {
                         id
                         content {
                           ... on Issue {
                             title
-                          }
-                        }
-                        fieldValueByName(name:"Status") {
-                          ... on ProjectV2ItemFieldSingleSelectValue {
-                            name
                           }
                         }
                         fieldValueByName(name:"Data de Vencimento") {
@@ -46,6 +42,11 @@ jobs:
                         fieldValueByName(name:"Documentação") {
                           ... on ProjectV2ItemFieldTextValue {
                             text
+                          }
+                        }
+                        fieldValueByName(name:"Prioridade") {
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            name
                           }
                         }
                       }
@@ -65,7 +66,7 @@ jobs:
               const today = new Date().toISOString().split('T')[0];
               
               console.log('📋 Verificando tarefas atrasadas...');
-              console.log(`Data atual: ${today}\n`);
+              console.log(`📅 Data atual: ${today}\n`);
               
               if (!result.user || !result.user.projectV2 || !result.user.projectV2.items) {
                 console.log('❌ Projeto não encontrado ou vazio');
@@ -78,17 +79,19 @@ jobs:
                 const title = item.content?.title || 'Sem título';
                 const dueDate = item.fieldValueByName('Data de Vencimento')?.date;
                 const documentation = item.fieldValueByName('Documentação')?.text;
-                const status = item.fieldValueByName('Status')?.name;
+                const priority = item.fieldValueByName('Prioridade')?.name;
                 
                 if (dueDate && dueDate < today && !documentation?.trim()) {
                   countOverdue++;
                   console.log(`🔴 ATRASADA: ${title}`);
-                  console.log(`   Vencimento: ${dueDate} | Status: ${status} | Documentação: VAZIA`);
+                  console.log(`   📅 Vencimento: ${dueDate}`);
+                  console.log(`   📄 Documentação: VAZIA`);
+                  console.log(`   🎯 Prioridade: ${priority || 'Não definida'}`);
                   console.log('---');
                 }
               }
               
-              console.log(`\n✅ Verificação concluída: ${countOverdue} tarefas atrasadas encontradas`);
+              console.log(`\n✅ Verificação concluída: ${countOverdue} tarefas encontradas`);
             } catch (error) {
               console.error('❌ Erro:', error.message);
             }
